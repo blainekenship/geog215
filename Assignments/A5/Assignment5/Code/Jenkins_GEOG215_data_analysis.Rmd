@@ -1,0 +1,238 @@
+---
+title: "Assignment #5, Initial Data Analysis"
+author: "Blaine Jenkins"
+date: 'Updated on `r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+   html_document:
+     theme: journal
+     highlight: textmate
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen = 999)
+```
+
+### Load Libraries
+
+```{r libraries, warning = FALSE, message = FALSE}
+## Load libraries
+library(tidyverse)
+library(sf)
+library(tmap)
+library(psych)
+library(knitr)
+library(kableExtra)
+```
+
+### Read Data
+
+```{r readdata, warning = FALSE, message = FALSE}
+# Read NC Zip Code spatial data
+nc_zip_sp <- read_sf("../Data/NC_ZipCode_Polygons.gpkg")
+
+# Read NC Zip Code COVID data
+nc_zip_covid <- read_csv("../Data/NC_ZipCode_Covid.csv")
+```
+
+### Data Wrangling
+
+```{r wrangle, warning = FALSE, message = FALSE}
+####
+#### Table join the attributes of nc_zip_covid to nc_zip_sp
+#### 
+#### Write output to a new object called   nc_zip_covid_sp
+####
+
+nc_zip_covid_sp <- left_join(nc_zip_sp,
+                       nc_zip_covid,
+                       by = c("ZIP_CODE" = "ZIP"))
+
+
+####
+#### Calculate new columns with Case and Death Rates per 1,000 people
+#### 
+#### Use CASERATE and DEATHRATE for the new column names
+####
+#### Formula is, for example,  1000 * cases / people
+####
+
+nc_zip_covid_sp <- nc_zip_covid_sp |>
+  mutate(CASERATE = 1000 * CASES / POP,
+         DEATHRATE = 1000 * DEATHS / POP)
+
+
+####
+#### Calculate the statewide Case and Death Rates per 1,000 people
+#### 
+
+#### First, use summarize() to sum the cases, deaths, and population
+####
+#### USE THE SAME FIELD NAMES IN THE SUMMARIZED OUTPUT
+####
+nc_covid <- nc_zip_covid_sp |>
+  st_drop_geometry() |>    # This function removes spatial column
+  summarize(CASES = sum(CASES, na.rm = TRUE),
+            DEATHS = sum(DEATHS, na.rm = TRUE),
+            POP = sum(POP, na.rm = TRUE))  ### You are required to finish this function!
+  
+
+####
+#### Next, Calculate new columns with Case and Death Rates per 1,000 people
+#### 
+#### Use CASERATE and DEATHRATE for the new column names
+####
+#### Formula is, for example,  1000 * cases / people
+####
+
+nc_covid <- nc_covid |>
+  mutate(CASERATE = 1000 * CASES / POP,
+         DEATHRATE = 1000 * DEATHS / POP)
+
+```
+
+### Descriptive Statistics
+
+```{r summarize, warning = FALSE, message = FALSE}
+# Create summary information table
+summary_table <- nc_zip_covid_sp |> 
+  st_drop_geometry() |>                   # Remove spatial column
+  select(-ZIP_CODE, -PO_NAME, -POP) |>    # Remove some columns
+  na.omit() |>                            # Remove obs with NA
+  describe(fast = TRUE)                   # Create summary table
+
+# Remove vars, std error from summary table
+summary_table <- summary_table |>
+  select(-vars, -se)
+
+## Print nice version of the table
+kable(summary_table, 
+      digits = 1,
+      format.args = list(big.mark = ",",
+                         scientific = FALSE,
+                         drop0trailing = TRUE),
+      caption = "Summary of North Carolina COVID-19 Cumulative Cases, Deaths, Case Rates (per 1,000 residents), and Death Rates (per 1,000 residents) by Zip Code") %>% 
+  kable_styling(bootstrap_options = c("striped", 
+                                      "hover", 
+                                      "condensed", 
+                                      "responsive"), 
+                full_width = F)
+
+
+```
+
+
+### Histogram 1
+
+```{r histogram1, warning = FALSE, message = FALSE, fig.width = 7, fig.height = 4}
+## plot histogram
+ggplot(nc_zip_covid_sp, 
+       aes(x = CASERATE)) + 
+  geom_histogram(binwidth = 0.2) +
+  labs(x = "Cumulative COVID-19 cases per 100,000 People",
+       y = "Count",
+       title = "Histogram of COVID-19 Case Rates") +
+  theme_minimal()
+
+```
+
+
+### Histogram 2
+
+```{r histogram2, warning = FALSE, message = FALSE, fig.width = 7, fig.height = 4}
+## Copy/paste code from Histogram 1 above but change 
+## the binwidth to improve the histogram
+## plot histogram
+ggplot(nc_zip_covid_sp, 
+       aes(x = CASERATE)) + 
+  geom_histogram(binwidth = 2) +
+  labs(x = "Cumulative COVID-19 cases per 100,000 People",
+       y = "Count",
+       title = "Histogram of COVID-19 Case Rates") +
+  theme_minimal()
+
+```
+
+### Histogram 3
+
+```{r histogram3, warning = FALSE, message = FALSE, fig.width = 7, fig.height = 4}
+## plot histogram
+ggplot(nc_zip_covid_sp, 
+       aes(x = CASES)) + 
+  geom_histogram(binwidth = 50) +
+  xlab("Cumulative COVID-19 cases") +
+  ggtitle("Histogram of COVID-19 Cases") +
+  theme_minimal()
+
+```
+
+### Choropleth Map 1
+
+```{r map1, warning = FALSE, message = FALSE, fig.width = 9, fig.height = 5}
+## Fill in the missing blanks below to make a map of the 
+## COVID Case Rates per 1000 people. Use jenks for the 
+## choropleth classification and YlOrRd for the color
+## palette
+
+## Plot map
+tm_shape(nc_zip_covid_sp) + 
+  tm_polygons("CASERATE", 
+              style = "jenks", 
+              palette = "YlOrRd",
+              lwd = 0.25,
+              border.col = "black",
+              border.alpha = 0.5,
+              title = "Cumulative COVID-19 Case Rate (per 1,000 people)")
+```
+
+
+### Choropleth Map 2
+
+```{r map2, warning = FALSE, message = FALSE, fig.width = 9, fig.height = 5}
+## Copy/paste code from Choropleth Map 1 (above), but change
+## the choropleth classification to quantile
+## Plot map
+tm_shape(nc_zip_covid_sp) + 
+  tm_polygons("CASERATE", 
+              style = "quantile", 
+              palette = "YlOrRd",
+              lwd = 0.25,
+              border.col = "black",
+              border.alpha = 0.5,
+              title = "Cumulative COVID-19 Case Rate (per 1,000 people)")
+
+```
+
+
+******
+
+##### Question 1. Write one sentence that **uses information from the table above** to describe the central tendency and dispersion of COVID-19 Case Rates (per 1,000 people) by Zip Code. (1 sentence, using at least one measure of central tendency and one measure of dispersion)
+
+The average COVID-19 Case Rate per 1,000 people is 16.5 with a standard deviation of 10.
+
+  
+******
+
+
+##### Question 2. Describe the differences between the data distributions found in Histogram 2 and Histogram 3? (1-2 sentences)
+
+Histogram 2 is closer to a normal curve (centered around 16) than 3, though it is slightly skewed to the right. Histogram 3 is highest around 0 and has a much wider spread, but is heavily skewed right.
+
+  
+******
+
+
+##### Question 3. Why is mapping COVID-19 Case Rates more appropriate than mapping the raw number of COVID-19 Cases? (2-3 sentences) 
+
+Case Rates are more easily compared between the zip codes. If we were going off of raw numbers, zip codes with a higher population would appear as if there were disproportionately more COVID-19 cases. This would disrupt an analysis.
+
+  
+******
+
+
+##### Question 4. Note that Choropleth Map 1 and 2 map the exact same data but use different choropleth classification schemes. In your opinion, which is easier for you to interpret and why is it easier? (2-3 sentences) 
+
+Choropleth Map 1 is easier to interpret because the zip codes with much higher case rates of COVID-19 are more visually apparent. Using the quantile separation, a wider range of values is in the highest rates category and it muddies the ability to see where the rates are actually the highest.
+
+  
+******

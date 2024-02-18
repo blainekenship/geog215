@@ -1,0 +1,88 @@
+---
+title: 'Assignment #3'
+author: "Blaine Jenkins"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+  html_document:
+    theme: cosmo
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, message = FALSE, warning = FALSE}
+### Load Libraries
+library(tidyverse)
+library(tidycensus)
+library(sf)
+library(tmap)
+```
+
+### Download Data
+
+```{r download,  message = FALSE, warning = FALSE}
+## Provide Census API Key
+census_api_key("1e97254fb99e83423df8bba73aa5998cb193c006")
+ 
+## Get variables for ACS 2021 5-year data
+acs_2021_vars <- load_variables(year = 2021,
+                                dataset = "acs5")
+## Download Data
+dat <- get_acs(state = "NC",
+               year = 2021,
+               geography = "tract",
+               variables = c("B01002_001", "B19013_001", "B25032_001", "B25032_002"),
+               output = "wide",
+               geometry = TRUE,
+               progress_bar = FALSE)
+```
+
+### Task 1
+
+the get_acs function brings in data from the API according to the specific parameters. State filters the brings in the rows where the state is "NC", year brings in rows with the year 2021, geography is filtered by tract. The following variables are brought in by column based on a vector of their names: Median Age By Sex, Median Household Income in the Past 12 Months, Tenure By Units in Structure, and Tenure By Units in Structure for owner-occupied housing units. Wide output puts enumeration units in the rows and variables in the columns. A TRUE value for geometry brings in an sf tibble. 
+
+### Data Wrangling
+
+``` {r wrangle}
+### Task 2
+
+dat <- dat |> select(GEOID, ends_with("E"))
+
+dat <- dat |> rename(MEDIAN_AGE = B01002_001E,
+                     MED_HH_INCOME = B19013_001E,
+                     HOUS_UNITS = B25032_001E,
+                     OWN_OCC_HOUS_UNITS = B25032_002E)
+
+dat <- dat |> mutate(PCT_OWN_OCC_HOUS_UNITS = OWN_OCC_HOUS_UNITS / HOUS_UNITS * 100)
+
+dat <- dat |> mutate(FIPS = (GEOID) |> str_sub(1,5))
+
+dat_sub<- dat |> filter(FIPS %in% c("37063", "37135", "37183"))  
+
+```
+
+### Data Summary
+
+``` {r summary, include = FALSE}
+
+## Get number of tracts/rows in Durham, Orange, Wake Counties
+dat_sub_n <- nrow(dat_sub)
+ 
+## Get number of tracts/rows in NC
+dat_n <- nrow(dat)
+ 
+## Identify how many observations have missing/NA values
+## Subset data to only complete
+complete_obs <- dat |> 
+  na.omit()
+ 
+## Use math to calculate number of NAs
+na_obs_n <- dat_n - nrow(complete_obs)
+
+```
+
+The ACS data for North Carolina in 2021 included `r dat_n` tracts. Of these, `r na_obs_n` tracts were missing data in one or more columns. After subsetting the data to only tracts in Durham, Orange, and Wake Counties, there were `r dat_sub_n` tracts.
+
+

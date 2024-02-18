@@ -1,0 +1,113 @@
+---
+title: "GEOG 215: Exam #2"
+author: "Blaine Jenkins"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    theme: journal
+    highlight: haddock
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Choropleth Map
+
+```{r map, warning = FALSE, message = FALSE}
+
+####  Load libraries
+library(tidyverse)
+library(sf)
+library(tmap)
+
+#############################      
+####  Download and Read in Data
+
+# Download NC counties GeoJSON shapefile from web
+counties <- read_sf('https://gis11.services.ncdot.gov/arcgis/rest/services/NCDOT_CountyBdy_Poly/MapServer/0/query?outFields=*&where=1%3D1&f=geojson')
+
+# Download NC vaccination data from web
+download.file('https://www.pauldelamater.net/geog215/exams/NC_Vaccination_Data.csv',
+              destfile = 'NC_Vaccination_Data.csv')
+
+# Read in vaccination csv
+nc_vacc <- read.csv('NC_Vaccination_Data.csv')
+
+
+#############################
+####  Wrangle data  
+
+# Add a field for the percentage of pop 12+ that's fully vaxxed
+nc_vacc <- nc_vacc |>
+  mutate("Per_Vacc"= VACCINATED / POP_A12p * 100)
+
+# Table join vaccination data to spatial layer
+vacc_sp <- left_join(counties,
+                     nc_vacc,
+                     by = c('CountyName' = 'NAME'))
+
+############################# 
+####  Make the Map
+
+# Reproject for a crs specific to NC
+vacc_sp <- vacc_sp |>
+  st_transform("EPSG:2264")
+
+# Create Choropleth map
+tm_shape(vacc_sp) +
+  tm_polygons("Per_Vacc",
+              border.alpha = 0.8,
+              style = "jenks",
+              palette = "Greens",
+              title = "% of NC Population (12+) with Vaccination")
+
+```
+
+
+### Data Processing 
+
+```{r iterate, warning = FALSE, message = FALSE}
+
+## Download data from the web
+download.file("https://www.pauldelamater.net/geog215/exams/GEOG215-Exam2-data.zip",
+              destfile = "GEOG215-Exam2-data.zip", mode = "wb")
+# Windows users, please add    mode = "wb"
+
+## Unzip the downloaded data
+unzip("GEOG215-Exam2-data.zip")
+ 
+# Store the names of the files to make them easy to reference when iterating
+folder_contents <- list.files("GEOG215-Exam2-data")
+ 
+# Store the number of files to help build the length of each column in an empty tibble
+n_files <- length(folder_contents)
+
+## Create an empty tibble to store Date, Cases, and Deaths from each file in the folder
+state_dat <- tibble(DATE = rep(as.Date(NA), n_files),
+                    CASES = rep(NA, n_files),
+                    DEATHS = rep(NA, n_files))
+
+## Loop through all the files in the folder to populate the empty tibble
+for (i in 1:n_files) {
+ 
+  ## Read a csv from the file (i tells you which one)
+  dat <- read_csv(paste0("GEOG215-Exam2-data/", folder_contents[i]))
+
+  ## Store the date of the csv file in state_dat
+  state_dat$DATE[i] <- str_sub(folder_contents[i], 22, 31)
+ 
+  ## Store the sum of the cases column in state_dat
+  state_dat$CASES[i] <- sum(dat$Cases, na.rm = TRUE)
+
+  ## Store the sum of the deaths column in state_dat
+  state_dat$DEATHS[i] <- sum(dat$Deaths, na.rm = TRUE)
+ 
+}
+```
+
+
+### Question
+
+The for loop was used above to easily read in and extract information from all the files in the folder without having to write a bunch of extra code. There were a set number of files to read in, so a while loop would not have made sense.

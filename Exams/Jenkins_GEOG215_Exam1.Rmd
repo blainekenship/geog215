@@ -1,0 +1,117 @@
+---
+title: "GEOG 215: Exam #1"
+author: "Blaine Jenkins"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    theme: journal
+    highlight: haddock
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Download and Read the File
+
+```{r libraies, message = FALSE, warning = FALSE}
+library(tidyverse)
+```
+
+```{r read, message = FALSE, warning = FALSE}
+## Download file
+download.file("https://delamater.web.unc.edu/files/2019/09/SEDA_SD_SCORES.csv",
+              destfile = "SEDA_SD_SCORES.csv")
+## Read in csv
+dat <- read_csv("SEDA_SD_SCORES.csv")
+
+## Question 2 Explanation
+class(dat$AVESCORE)
+```
+
+### Question #1
+
+There are 38879 rows and 6 columns in this table. I got this information by looking in my environment after creating the reading in the csv to the dat object. The number of rows and columns are stated to the right of the name dat.
+
+### Question #2
+
+The data type of the column AVESCORE is numeric, as found in the read R code chunk.
+
+### Data Wrangling
+
+```{r wrangle, message = FALSE, warning = FALSE}
+
+## Filter dat object to only include the state of North Carolina and all students
+nc_dat = dat |>
+  filter(STATE == "NC" & GROUP == "all")
+
+## Remove values of NA from the AVESCORE column in nc_dat
+nc_dat <- nc_dat |>
+  filter(!is.na(AVESCORE))
+
+## Subset nc_dat object to only include the columns
+## named LEA_ID, LEA_NAME, and AVESCORE 
+nc_dat <- nc_dat |>
+  select(LEA_ID, LEA_NAME, AVESCORE)
+
+## Rename nc_dat column AVESCORE to SCORE
+nc_dat <- nc_dat |>
+  rename(SCORE = AVESCORE)
+
+## Calculate a new column in the nc_dat object called
+## SCOREDEV that contains the difference of each LEA's
+## score and 5.5, i.e.,  SCORE - 5.5
+nc_dat <- nc_dat |>
+  mutate(SCOREDEV = SCORE - 5.5)
+
+## Count the number of LEAs in nc_dat
+nc_leas_n <- nrow(nc_dat)
+
+## Find the average, minimum, and maximum of the SCORE column in nc_dat
+nc_lea_summary <- nc_dat |>
+  summarize(AVE = mean(SCORE),
+            MIN = min(SCORE),
+            MAX = max(SCORE))
+
+## Find the number of students with a score greater than or equal to 5.5
+above_exp_n <- nc_dat |>
+  filter(SCORE >= 5.5) |>  ## 5.5 is grade-appropriate level
+  nrow()
+
+## Find the percent of all students in NC who have grade-appropriate level academic
+## achievement scores
+pct_exp_ave <- 100 * above_exp_n / nc_leas_n
+```
+
+### Use Inline Code to Print Results
+
+There are `r nc_leas_n` LEAs in North Carolina that have academic achievement scores provided in the Stanford data. The average LEA academic achievement score in North Carolina is `r nc_lea_summary[1]`. Out of all LEAs in NC, `r pct_exp_ave` percent have scores that suggest their students are performing at a grade-appropriate level or better.
+
+### Extra Credit
+
+```{r ec, message = FALSE, warning = FALSE}
+
+## Long table to wide table conversion
+#all_nc_dat <- na.omit(pivot_wider(filter(dat,STATE=="NC"),id_cols=LEA_NAME,names_from=GROUP,values_from=AVESCORE))
+
+all_nc_dat <- dat |>
+  filter(STATE == "NC") |>
+  pivot_wider(id_cols=LEA_NAME,names_from=GROUP,values_from=AVESCORE) |>
+  na.omit()
+
+## Rename columns using rename()
+#names(all_nc_dat)[2:4]<-c("ALL","ECD","NEC")
+all_nc_dat <- all_nc_dat |>
+  rename(ALL = all,
+         ECD = ecd,
+         NEC = nec)
+
+## Calculate new column of with disparity between scores from students
+## in economically challenged households and those from non-economically 
+## challenged households
+#all_nc_dat$NEC_ECD_DISP <- all_nc_dat$NEC- all_nc_dat$ECD
+all_nc_dat <- all_nc_dat |>
+  mutate(NEC_ECD_DISP = NEC - ECD)
+```
+

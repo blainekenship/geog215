@@ -1,0 +1,274 @@
+---
+title: "GEOG 215: Assignment #7, ESDA - Spatial Clustering"
+author: "Blaine Jenkins"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+  html_document:
+     theme: journal
+     highlight: textmate
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen = 999)
+```
+
+```{r libraries, message = FALSE, warning = FALSE}
+# Get spatial libraries
+library(tidyverse)
+library(tigris)
+library(sf)
+library(tmap)
+library(spdep)
+```
+
+# Spatial Autocorrelation ESDA
+
+In this analysis, we will be examining whether Social Vulnerability is spatially autocorrelated using values from the CDC's Social Vulnerability Index (SVI); further, we will be identifying where there are spatial clusters (and outliers) of High and Low SVI values.
+
+## Read in US SVI data
+
+```{r readdata, message = FALSE, warning = FALSE}
+# Get US County Data
+us_counties <- counties(year = 2020,
+                        cb = TRUE,
+                        progress_bar = FALSE)
+
+## Read in SVI data
+us_svi <- read_csv("../Data/SVI_2020_US_county.csv")
+
+## Subset
+us_counties <- us_counties |>
+  select(GEOID)
+
+## Subset
+us_svi <- us_svi |>
+  select(STATE, FIPS, RPL_THEMES) |>
+  filter(!(STATE %in% c("Alaska", "Hawaii")))
+
+## Merge spatial and non-spatial data
+us_svi <- right_join(us_counties,
+                     us_svi,
+                     by = c("GEOID" = "FIPS"))
+```
+
+## ESDA - Descriptive Statistics, Average Score
+
+```{r descriptive, message = FALSE, warning = FALSE}
+####
+####
+#### We will be working with the column RPL_THEMES
+#### This is the overall percentile rank for social
+#### vulnerability in the US
+####
+
+# Number of observations
+n_obs <- nrow(us_svi)
+
+# Number of NON-NA observations
+n_good_obs <- us_svi |>
+  filter(!is.na(RPL_THEMES)) |>
+  nrow()
+  
+# Mean 
+mean_us <- mean(us_svi$RPL_THEMES, na.rm = TRUE) |>
+  round(3)
+  
+# Minimum and Maximum 
+min_us <- min(us_svi$RPL_THEMES, na.rm = TRUE) |>
+  round(3)
+max_us <- max(us_svi$RPL_THEMES, na.rm = TRUE) |>
+  round(3)
+```
+
+A data frame was created to analyze the social vulnerability index per county in the contiguous US. There are `r n_obs` observations, `r n_good_obs` of which are without NAs, spread between `r min_us` and `r max_us` with a mean of `r mean_us`.
+
+******
+
+## ESDA - Distribution and Map
+
+```{r distribution, message = FALSE, warning = FALSE, fig.width = 10}
+# Create a histogram of CASES14DR
+ggplot(us_svi,                  ## R object
+       aes(x = RPL_THEMES)) +   ## Column in object
+  geom_histogram(na.rm = TRUE,  ## Add histogram bars without NA warning 
+                 bins = 40,     ## Add histogram bars
+                 fill = "red",  ## Fill color of histogram bars 
+                 col = "black", ## Line color of histogram bars 
+                 size = 0.25,   ## Line weight/thickness of historam bars  
+                 alpha = 0.7) + ## Fill transparency   
+  labs(x = "Social Vulnerability Index",     ## X axis label
+       y = "Number of Counties") +           ## Y axis label
+  theme_classic()                            ## Apply theme
+
+# Make a quick choropleth map of CASES14DR
+tm_shape(us_svi,
+         projection = "ESRI:102003") + 
+  tm_polygons("RPL_THEMES",
+              title = "Social Vulnerability Index",
+              style = "pretty",
+              palette = "Reds",
+              border.col = "Black",
+              border.alpha = 0.25,
+              legend.hist = TRUE) +
+  tm_layout(frame = FALSE,
+            legend.outside = TRUE)
+```
+
+The histogram shows an evenly spread distribution, meaning every value in the social vulnerability index is represented in a similar number of US counties. The map shows that the spatial distribution is not nearly as even. There are visually clear clusters of high and low values.
+
+******
+
+## ESDA - Neighbors and Neighborhoods
+
+```{r neighbors, message = FALSE, warning = FALSE}
+## Subset data to ONLY observations with values!
+## You must remove NAs prior to Moran's I and LISA analysis
+us_svi <- us_svi |>
+  filter(!is.na(RPL_THEMES))
+
+## Create Queen case neighbors
+us_nb_queen <- poly2nb(us_svi, 
+                       queen = TRUE)
+
+## Print summary to screen
+us_nb_queen
+
+### Note, only print the summary of the neighbors in a report
+### if you're making it part of the analysis. In general, this
+### information isn't really interesting or necessary!
+
+```
+
+******
+
+## ESDA - Spatial Autocorrelation (Moran's I)
+
+```{r moransI, message = FALSE, warning = FALSE}
+
+## Convert neighbor object to weight matrix
+us_wm_queen <-  nb2listw(us_nb_queen,
+                         style = "B",         # B is binary (1,0)
+                         zero.policy = TRUE)  # Allow obs with 0 neighbors
+
+#
+# Moran's I
+#
+us_svi_moran <- moran.test(us_svi$RPL_THEMES,         # Variable we're analyzing
+                           listw = us_wm_queen,       # Sp weights matrix
+                           alternative = "two.sided", # Clustering or Dispersion
+                           randomisation = TRUE,      # Compare to randomized values
+                           zero.policy = TRUE)        # Allow obs with 0 neighbors
+
+## Summary
+us_svi_moran
+
+### Note:  In a report, do not print the summary of Moran's I. Extract the necessary
+###        values and insert them using inline
+### e.g.,  The Moran's I statistic is us_svi_moran$estimate[1]
+###        The p values is us_svi_moran$p.value
+
+```
+
+The Moran's I statistic is `r us_svi_moran$estimate[1]`, with a p value of `r us_svi_moran$p.value`. This means the spatial autocorrelation for the contiguous US is somewhat dispersed and somewhat random. Because the p value is low, the results are statistically significant.
+
+******
+
+## ESDA - Spatial Autocorrelation (LISA)
+
+```{r lisa, message = FALSE, warning = FALSE, fig.height = 10, fig.width = 10}
+
+#
+# LISA -- Local Moran's I
+#
+us_svi_lisa <- localmoran(us_svi$RPL_THEMES,         # Variable we're analyzing
+                          listw = us_wm_queen,       # Weights object
+                          alternative = "two.sided", # Clustering or Dispersion
+                          zero.policy = TRUE) |>     # Best to keep TRUE for LISA
+  as_tibble() |>                                     # Better object type
+  mutate(across(everything(), as.vector))            # Remove junk from localmoran output
+  
+
+##
+## To get "nice" LISA categories for mapping
+## takes a bit of work in R, unfortunately
+##
+
+# Add values required for LISA category
+us_svi_lisa <- us_svi_lisa |>
+  mutate(SCVAR =  scale(us_svi$RPL_THEMES) |> as.vector(),           # Original data column
+         LAGVAR = lag.listw(us_wm_queen, scale(us_svi$RPL_THEMES)),  # Lag of original data column
+         LISACAT = case_when(SCVAR >= 0 & LAGVAR >= 0 & `Pr(z != E(Ii))` <= 0.05 ~ 1,
+                             SCVAR <= 0 & LAGVAR <= 0 & `Pr(z != E(Ii))` <= 0.05 ~ 2,
+                             SCVAR >= 0 & LAGVAR <= 0 & `Pr(z != E(Ii))` <= 0.05 ~ 3,
+                             SCVAR <= 0 & LAGVAR >= 0 & `Pr(z != E(Ii))` <= 0.05 ~ 4,
+                             `Pr(z != E(Ii))` > 0.05 ~ 5))
+
+# This simply adds a label based on the values
+us_svi_lisa <- us_svi_lisa |>
+  mutate(CATNAME = case_when(LISACAT == 1 ~ "HH",
+                             LISACAT == 2 ~ "LL",
+                             LISACAT == 3 ~ "HL",
+                             LISACAT == 4 ~ "LH",
+                             LISACAT == 5 ~ "Not Significant"))
+
+## Quick SUMMARY of LISA output
+table(us_svi_lisa$CATNAME)
+
+### Note:  In a report, do not print the summary of LISA in the report
+###        If you want to include, use inline or create a table with the info
+
+## Add LISA category column to the spatial data
+## for mapping!
+us_svi <- us_svi |>
+  mutate(LISACAT = us_svi_lisa$LISACAT,
+         CATNAME = us_svi_lisa$CATNAME)
+
+# Plot two maps together!
+# First, the chorolpleth map
+svi_tmap <- tm_shape(us_svi,
+                     projection = "ESRI:102003") + 
+  tm_polygons("RPL_THEMES",
+              title = "Social Vulnerability Index",
+              style = "pretty",
+              palette = "Reds",
+              colorNA = "white",
+              border.col = "black",
+              border.alpha = 0.25,
+              legend.hist = TRUE) +
+  tm_layout(frame = FALSE,
+            legend.outside = TRUE)
+
+# Second the LISA map
+lisa_tmap <- tm_shape(us_svi,
+                      projection = "ESRI:102003") + 
+  tm_polygons("LISACAT", 
+              title = "LISA Category",
+              breaks = c(1, 2, 3, 4, 5, 6),
+              palette =  c("red", 
+                           "blue", 
+                           "lightpink", 
+                           "skyblue", 
+                           "grey90"),
+              colorNA = "white",
+              labels = c("High-High", 
+                         "Low-Low",
+                         "High-Low",
+                         "Low-High", 
+                         "Not significant"),
+              border.col = "black", 
+              border.alpha = 0.25) +
+  tm_layout(frame = FALSE,
+            legend.outside = TRUE)
+
+# This command maps them together!
+tmap_arrange(svi_tmap, 
+             lisa_tmap,
+             ncol = 1,
+             nrow = 2)  
+
+```
+
+The LISA output reports 544 high highs and 455 low lows. clusters of the high highs and the low lows are spatially separated, with the highs in the south and lows in the north. The social vulnerability index is very high in the south and southwest and help should be directed to those areas.  
+
+******

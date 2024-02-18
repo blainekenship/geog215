@@ -1,0 +1,64 @@
+---
+title: "Assignment #2"
+author: "Blaine Jenkins"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    theme: cosmo
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Download and Read Data
+
+```{r download}
+## Download file
+download.file("https://delamater.web.unc.edu/wp-content/uploads/sites/15517/2019/08/CA_kind_0015_Sch_Counts_PBE.csv",
+              "C://Users/Blaine/Desktop/GEOG215/A2/CA_kind_0015_Sch_Counts_PBE.csv")
+## Read in csv
+
+cavac <- read.csv("C://Users/Blaine/Desktop/GEOG215/A2/CA_kind_0015_Sch_Counts_PBE.csv" )
+
+```
+### Data Summary
+
+The number of schools/rows in the table: `r nrow(cavac) `  
+The number of columns in the table: `r ncol(cavac)`
+
+### Aggregating data
+
+```{r aggregate}
+## Print column names
+names(cavac)
+## Sum the values in each column
+CA.sums <- colSums(cavac[, 6:37], na.rm = TRUE)
+
+## Print result
+CA.sums
+
+## Store the sums of the total counts of children
+CA.enr <- CA.sums[1:16]
+ 
+## Store the sums of the counts of children with PBE
+CA.pbe <- CA.sums[17:32]
+ 
+## Calculate the percent of children entering K with PBE
+CA.pbe.pct <- 100 * CA.pbe / CA.enr
+ 
+## Print result
+CA.pbe.pct
+
+names(CA.pbe.pct) <- paste0("PBEPCT", 2000:2015)
+ 
+## Change the column names in CA.pbe.pct to "PBEPCT" and the year the data is from without a space between the letters and numbers
+
+```
+### Plots
+
+``` {r plotschools}
+## Plot geographic locations of all CA schools
+plot(cavac$lon, cavac$lat)
+
