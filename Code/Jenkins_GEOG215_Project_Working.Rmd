@@ -1,0 +1,196 @@
+---
+title: "GEOG 215 Project"
+author: "Blaine Jenkins"
+date: "2023-11-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Project Task #1
+
+
+### Topic
+
+Housing in Boston, MA
+
+
+### Interest
+
+I'm interested in looking at housing in Boston primarily for a personal reason. I'm graduating next May and Boston is on my list of possible places to move and I'd like to see if it's a viable option for myself. The importance of this topic, however, goes well beyond the scope of my own interests. Boston is one of the most gentrified cities in the US and is currently facing a housing shortage, pushing up prices and pushing out long-time residents in a racially disproportionate way.
+
+https://dailyfreepress.com/2021/02/18/boston-remains-highly-gentrified-despite-housing-efforts/
+
+The article linked above gives good background on the recent gentrification in Boston and claims efforts to create new housing have only accelerated the process. I would like to see the spatial relationship over time of new housing and average income in neighborhoods to verify this.
+
+https://www.bu.edu/articles/2022/greater-boston-housing-earns-failing-grade-in-annual-report/
+
+This article speaks more to the Boston housing shortage and how it widens racial disparities in terms of home ownership and renting. It would be interesting to see the change in the relationship between race and home ownership in recent years, or to see the change in race and income in historically redlined neighborhoods to see the effects of gentrification.
+
+
+### Data
+
+From the American Community Survey, I would like to use the Value of Home variable as my main variable at the census block group for the greater Boston area.
+
+
+## Project Task #2
+
+
+```{r libraries_pt2, eval = FALSE, include = FALSE}
+# Load libraries
+library(tidyverse)
+library(sf)
+```
+
+
+### Data Summary
+
+```{r summary_pt2, eval = FALSE, include = FALSE}
+# Read in ACS 2013 data
+bostv <- read_sf("../Raw_Data/acs21.gpkg")
+
+# Find the number of rows
+nrows <- nrow(bostv)
+
+# Find the number of columns
+ncols <- ncol(bostv)
+```
+
+
+### Data Wrangling
+
+```{r wrangle_pt2, eval = FALSE, include = FALSE}
+# Keep the important columns
+bostv <- bostv |> select(GEOID, geom, ends_with("E"), -2)
+
+# Rename columns
+bostv <- bostv |> rename(MEDVALUE = B25097_001E,
+                         MEDINCOME = B25099_001E)
+
+# Create new column for Price to Income ratio
+bostv <- bostv |> mutate(PIR = MEDVALUE / MEDINCOME)
+
+# Subset to PIR above national average (greater than 5)
+bostv <- bostv |> filter(PIR > 5, na.rm = TRUE)
+
+```
+
+
+## Project Task #3
+
+
+```{r libraries, message = FALSE, warning = FALSE}
+# Load libraries
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(tmap)
+```
+
+
+### Data Preparation
+
+```{r prep, message = FALSE, warning = FALSE}
+# Read in National Risk Index MA tract data
+ma_nri <- read_csv("../Raw_Data/NRI_Table_CensusTracts_Massachusetts.zip")
+
+# Read in ACS 2013 data
+bostv <- read_sf("../Raw_Data/acs21.gpkg")
+
+# Keep the ACS important columns
+bostv <- bostv |> select(GEOID, geom, ends_with("E"), -2)
+
+# Rename ACS columns
+bostv <- bostv |> rename(MEDVALUE = B25097_001E,
+                         MEDINCOME = B25099_001E)
+
+# Create new column for Price to Income ratio
+bostv <- bostv |> mutate(PIR = MEDVALUE / MEDINCOME)
+
+# Subset important NRI columns
+ma_nri <- ma_nri |> select(TRACTFIPS, CFLD_ALRB, CFLD_RISKS)
+
+# Rename subsetted NRI columns
+ma_nri <- ma_nri |> rename(BLDG_LOSS = CFLD_ALRB,
+                           RISK = CFLD_RISKS)
+
+```
+
+
+### Table Join
+
+```{r join, message = FALSE, warning = FALSE}
+
+# Convert NRI key field to char
+ma_nri <- ma_nri |>
+  mutate(TRACTFIPS = as.character(TRACTFIPS))
+
+# Left join
+bostv <- left_join(bostv,
+                   ma_nri,
+                   by = c("GEOID" = "TRACTFIPS"))
+
+```
+
+This join was successfully completed because the new data frame has all the variables populated. `bostv` is a has less values, so many rows of `ma_nri` cannot be found in the new data frame, but the key fields matched elsewhere.
+
+### Summary
+
+```{r summary, message = FALSE, warning = FALSE}
+# Calculate mean
+pir_mean <- mean(bostv$PIR, na.rm = TRUE)
+
+# Calculate min
+pir_min <- min(bostv$PIR, na.rm = TRUE)
+
+# Calculate max
+pir_max <- max(bostv$PIR, na.rm = TRUE)
+
+```
+
+The values of Price per Income fall between `r pir_min` and `r pir_max`, with a mean of `r pir_mean`. 
+
+
+### Histogram
+
+```{r histogram, message = FALSE, warning = FALSE}
+# Use ggplot to make the histogram
+ggplot(data = bostv,
+       aes(PIR)) + 
+  geom_histogram(binwidth = 0.55,
+                 na.rm = TRUE,
+                 fill = "lightblue",
+                 col = "grey20",
+                 alpha = 0.6) +
+  labs(title = "Home Price Per Income",
+       subtitle = "Suffolk County, MA (census tracts)",
+       y = "Counts",
+       x = "Home Price Per Income")
+
+```
+
+The data is centered around 4.8, with a skew to the right. If it weren't for the skew, the data would be relatively bell-shaped.
+
+
+### Choropleth Map
+
+```{r map, message = FALSE, warning = FALSE}
+# Use tmap to make a map
+tm_shape(bostv) + 
+  tm_polygons("PIR",
+              title = "Price Per Income",
+              style = "jenks",
+              palette = "Blues",
+              alpha = 0.9,                   ## Transparency for the polygon fills
+              border.col = "black",          ## Color for the polygon lines
+              border.alpha = 0.3,) +
+  tm_layout(main.title = "Suffolk County, MA: Home Price Per Income",
+            main.title.size = 1.1,
+            frame = FALSE)
+
+```
+
+Homes with a higher price per income are clustered together toward the center of the county. The area surrounding the bay also shows a higher price per income than the more inland/rural parts of the county.
+

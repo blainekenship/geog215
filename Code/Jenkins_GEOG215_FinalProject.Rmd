@@ -1,0 +1,273 @@
+---
+title: "Final Project"
+author:
+- Blaine Jenkins \newline
+- GEOG215
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    theme: united
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Housing in Suffolk County, MA
+
+***
+
+### Introduction
+
+I will be analyzing the value of homes in Suffolk County, MA, which is a large section of the city of Boston. In recent years, Boston has become increasingly gentrified, driving up the values of homes and pushing out current long-term residents. It is important to see the spread of home values and their spatial relationship to see what areas may be more affected by gentrification. These areas should be focused on in further studies to more fully understand the impact of gentrification and propose solutions.
+
+***
+
+### Data Preparation
+
+```{r libraries, message = FALSE, warning = FALSE}
+# Load libraries
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(tmap)
+library(spdep)
+library(kableExtra)
+```
+
+
+```{r data_prep, message = FALSE, warning = FALSE}
+# Read in 2021 ACS data
+suf_acs <- read_sf("../Raw_Data/acs21.gpkg")
+
+# Keep the ACS important columns
+suf_acs <- suf_acs |> select("B25097_001E", "geom")
+
+# Rename ACS columns
+suf_acs <- suf_acs |> rename(VALUE = B25097_001E)
+
+# Make med home value per 1000
+suf_acs <- suf_acs |> mutate(MHVALUE = VALUE / 1000)
+```
+
+This data is derived from the American Community Survey that is conducted every 5 years. There are many fields associated with this database, and they had to be selected during the downloading and further cleaned during processing. The downloading was done in a separate R markdown file to keep this file from redownloading data each time it knits. Only the main variable (median home value) and geospatial information are kept and the columns were renamed for ease of analysis.The MHV was divided by 1,000 for a clearer presentation and analysis.
+
+***
+
+### Exploratory Spatial Data Analysis
+
+***
+
+#### Data Description and Summary
+
+```{r data_summary, message = FALSE, warning = FALSE}
+# Calculate number of rows
+nobs <- nrow(suf_acs)
+
+# Calculate number of nas
+nna <- nrow(suf_acs |> filter(is.na(suf_acs$MHVALUE)))
+
+# Calculate mean
+meanv <- mean(suf_acs$MHVALUE, na.rm = TRUE)
+
+# Calculate min
+minv <- min(suf_acs$MHVALUE, na.rm = TRUE)
+
+# Calculate max
+maxv <- max(suf_acs$MHVALUE, na.rm = TRUE)
+
+# Plot a histogram with ggplot
+ggplot(suf_acs,
+       aes(x = MHVALUE)) + 
+  geom_histogram(binwidth = 40,
+                 na.rm = TRUE,
+                 fill = "lightblue",
+                 col = "grey20",
+                 alpha = 0.6) +
+  labs(title = "Median Home Value",
+       subtitle = "Suffolk County, MA (census tracts)",
+       y = "Counts",
+       x = "Median Home Value per 1,000 USD")
+                 
+```
+
+The data set contained `r nobs` observations, and after removing the `r nna` NA values, the median home value in Suffolk County, MA ranged from `r minv` to `r maxv` per 1,000 US Dollars. The average value is `r meanv`. The shape of the distribution of the data is heavily skewed to the right, with a peak centered around 500,000. The skew toward the higher values pulls the mean higher up, which is similar to the effect of gentrification itself. What was once average becomes low.
+
+***
+
+#### Geographic Distribution and Clustering
+
+```{r map, message = FALSE, warning = FALSE}
+# Put the tmap mode to view
+tmap_mode("view")
+
+# Use tmap to make a map
+tm_shape(suf_acs) + 
+  tm_polygons("MHVALUE",
+              title = "Median Home Value per 1,000 USD",
+              style = "jenks",
+              palette = "Blues",
+              alpha = 0.9,
+              border.col = "black",
+              border.alpha = 0.3,) +
+  tm_layout(main.title = "Suffolk County, MA: Median Home Value",
+            main.title.size = 1.1,
+            frame = FALSE)
+
+
+## Moran's I work
+
+# Make a copy
+misuf_acs <- suf_acs
+
+# Remove NAs
+misuf_acs <- misuf_acs |>
+  filter(!is.na(MHVALUE))
+
+# Create Queen case neighbors
+suf_queen <- poly2nb(misuf_acs,
+                    queen = TRUE)
+
+# First, convert our neighbors to weight matrix
+suf_q_weights <- nb2listw(suf_queen,
+                         style = "B",         
+                         zero.policy = TRUE) 
+
+# Moran's I
+suf_acs_moran <- moran.test(misuf_acs$MHVALUE,
+                             suf_q_weights,
+                             zero.policy = TRUE,
+                             randomisation = TRUE)
+
+# MORAN'S I VALUE
+moran_i_value <- suf_acs_moran$estimate[1]
+
+# P-Value for MORAN'S I
+moran_p_value <- suf_acs_moran$p.value
+
+
+## LISA work
+
+# LISA
+suf_mhi_lisa <- localmoran(misuf_acs$MHVALUE,
+                            listw = suf_q_weights,
+                            alternative = "two.sided",
+                            zero.policy = TRUE) |>
+  as_tibble() |>
+  mutate(across(everything(), as.vector))
+
+# Add values required for LISA category
+suf_mhi_lisa <- suf_mhi_lisa |>
+  mutate(SCVAR =  scale(misuf_acs$MHVALUE) |> as.vector(),
+         LAGVAR = lag.listw(suf_q_weights, scale(misuf_acs$MHVALUE)),
+         LISACAT = case_when(SCVAR >= 0 & LAGVAR >= 0 & `Pr(z != E(Ii))` <= 0.05 ~ 1,
+                             SCVAR <= 0 & LAGVAR <= 0 & `Pr(z != E(Ii))` <= 0.05 ~ 2,
+                             SCVAR >= 0 & LAGVAR <= 0 & `Pr(z != E(Ii))` <= 0.05 ~ 3,
+                             SCVAR <= 0 & LAGVAR >= 0 & `Pr(z != E(Ii))` <= 0.05 ~ 4,
+                             `Pr(z != E(Ii))` > 0.05 ~ 5))
+
+# Ad labels based on values
+suf_mhi_lisa <- suf_mhi_lisa |>
+  mutate(CATNAME = case_when(LISACAT == 1 ~ "HH",
+                             LISACAT == 2 ~ "LL",
+                             LISACAT == 3 ~ "HL",
+                             LISACAT == 4 ~ "LH",
+                             LISACAT == 5 ~ "Not Significant"))
+
+# Quick SUMMARY of LISA output
+lisa_summary <- table(suf_mhi_lisa$CATNAME)
+
+# Change the names in the summary table
+names(lisa_summary) <- c("High-Highs", "High-Lows", "Low-Highs", "Low-Lows", "Not Significant")
+
+# Add LISA category column to the spatial data for mapping!
+misuf_acs <- misuf_acs |>
+  mutate(LISACAT = suf_mhi_lisa$LISACAT,
+         CATNAME = suf_mhi_lisa$CATNAME)
+
+# map
+mhi_tmap <- 
+  tm_shape(suf_acs) +
+  tm_polygons(col = "grey50") +
+  tm_shape(misuf_acs) + 
+  tm_polygons("MHVALUE",
+              title = "Median Home Value
+  per 1,000 USD",
+              style = "jenks",
+              palette = "Greens",
+              colorNA = "white",
+              border.col = "black",
+              border.alpha = 0.25,
+              legend.hist = TRUE) +
+  tm_layout(frame = FALSE,
+            legend.outside = TRUE)
+
+# Second the LISA map
+lisa_tmap <- 
+  tm_shape(suf_acs) +
+  tm_polygons(col = "grey50") +
+  tm_shape(misuf_acs) + 
+  tm_polygons("LISACAT", 
+              title = "LISA Category",
+              breaks = c(1, 2, 3, 4, 5, 6),
+              palette =  c("red", 
+                           "blue", 
+                           "lightpink", 
+                           "skyblue", 
+                           "grey90"),
+              colorNA = "white",
+              labels = c("High-High", 
+                         "Low-Low",
+                         "High-Low",
+                         "Low-High", 
+                         "Not significant"),
+              border.col = "black", 
+              border.alpha = 0.25) +
+  tm_layout(frame = FALSE,
+            legend.outside = TRUE)
+
+# This command maps them together!
+tmap_arrange(mhi_tmap,
+             lisa_tmap,
+             ncol = 1,
+             nrow = 2,
+             sync = TRUE)
+
+# Print using kable
+kable(lisa_summary) |>
+  kable_styling(bootstrap_options = c("striped", 
+                                      "hover", 
+                                      "condensed", 
+                                      "responsive"), 
+                full_width = F)
+```
+
+The highest values are heavily centered in the center of the county, which would be downtown Boston. There is a stark difference between this cluster of values and the areas surrounding it to the North and South, which are significantly lower. The Moran's I value of `r moran_i_value` is fairly close to 1, meaning there is a positive spatial autocorrelation that is fairly strong. This means there are several clusters of like values. The p-value of `r moran_p_value` is low (near 0), indicating statistical significance of the I value. This is further validated by the LISA results, which shows 24 High-High and 11 Low-Low clusters. As seen in the choropleth map, the High-High results are centered in the county. The Low-Low clusters are also mostly together at the Northern end of the county. These clusters, although separated, are fairly close together, indicating neighborhoods of low and high income in similar parts of the city. There is one Low-Low cluster that stands alone in the South of Suffolk County. The neighbors of that singular census block must all be low, but their neighbors would have slightly higher values. Looking at the choropleth map, there is a small pocket of the lowest values, confirming this. There are also a few Low-Highs and a High-Low section surrounding the large High-High cluster. This further indicates the isolation of these high-valued homes and their juxtaposition with low valued homes, where there is likely a social and economic disparity.
+
+***
+
+### Conclusions
+
+This analysis has reviewed the spatial distribution of median home value in Suffolk County, MA in order to identify the areas with that have been gentrified. The results show clusters of homes valued at extremely high prices and those valued at extremely low prices, relatively. The disparity in these neighborhoods could indicate locations of gentrification and neighborhoods susceptible to it. In order to understand this problem more fully, there would need to be an analysis of multiple variables such as time, median household income, price per income, and race. This would aid in the understanding of displacement and shift of populations. It is important to look at time as a factor in order to see if the things like the High-High clusters are new developments. Without a temporal component, there is no way to see the effects of gentrification, as the process develops over time.
+
+***
+
+### Document Statistics
+
+#### Word Count
+```{r , echo = FALSE, message = FALSE}
+wordcountaddin:::text_stats() %>%
+  kable_styling(bootstrap_options = c("striped",
+                                      "hover",
+                                      "condensed",
+                                      "responsive"),
+                full_width = F)
+```
+
+
+
+
+
